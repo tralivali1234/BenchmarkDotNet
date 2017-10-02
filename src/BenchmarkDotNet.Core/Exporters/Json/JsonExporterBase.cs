@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using BenchmarkDotNet.Environments;
 using JsonSerialiser = SimpleJson.SimpleJson;
+using BenchmarkDotNet.Diagnosers;
 
 namespace BenchmarkDotNet.Exporters.Json
 {
@@ -28,8 +29,8 @@ namespace BenchmarkDotNet.Exporters.Json
             {
                 HostEnvironmentInfo.BenchmarkDotNetCaption,
                 summary.HostEnvironmentInfo.BenchmarkDotNetVersion,
-                summary.HostEnvironmentInfo.OsVersion,
-                summary.HostEnvironmentInfo.ProcessorName,
+                OsVersion = summary.HostEnvironmentInfo.OsVersion.Value,
+                ProcessorName = summary.HostEnvironmentInfo.ProcessorName.Value,
                 summary.HostEnvironmentInfo.ProcessorCount,
                 summary.HostEnvironmentInfo.RuntimeVersion,
                 summary.HostEnvironmentInfo.Architecture,
@@ -37,7 +38,7 @@ namespace BenchmarkDotNet.Exporters.Json
                 summary.HostEnvironmentInfo.HasRyuJit,
                 summary.HostEnvironmentInfo.Configuration,
                 summary.HostEnvironmentInfo.JitModules,
-                DotNetCliVersion = summary.HostEnvironmentInfo.DotNetCliVersion.Value,
+                DotNetCliVersion = summary.HostEnvironmentInfo.DotNetSdkVersion.Value,
                 summary.HostEnvironmentInfo.ChronometerFrequency,
                 HardwareTimerKind = summary.HostEnvironmentInfo.HardwareTimerKind.ToString()
             };
@@ -60,6 +61,12 @@ namespace BenchmarkDotNet.Exporters.Json
                     { "Statistics", r.ResultStatistics },
                 };
 
+                // We show MemoryDiagnoser's results only if it is being used
+                if(summary.Config.GetDiagnosers().Any(diagnoser => diagnoser is MemoryDiagnoser))
+                {
+                    data.Add("Memory", r.GcStats);
+                }
+                
                 if (ExcludeMeasurements == false)
                 {
                     // We construct Measurements manually, so that we can have the IterationMode enum as text, rather than an integer
@@ -78,7 +85,7 @@ namespace BenchmarkDotNet.Exporters.Json
             });
 
             JsonSerialiser.CurrentJsonSerializerStrategy.Indent = IndentJson;
-            logger.Write(JsonSerialiser.SerializeObject(new Dictionary<string, object>
+            logger.WriteLine(JsonSerialiser.SerializeObject(new Dictionary<string, object>
             {
                 { "Title", summary.Title },
                 { "HostEnvironmentInfo", environmentInfo },

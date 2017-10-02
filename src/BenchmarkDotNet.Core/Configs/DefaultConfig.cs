@@ -5,10 +5,12 @@ using BenchmarkDotNet.Columns;
 using BenchmarkDotNet.Diagnosers;
 using BenchmarkDotNet.Exporters;
 using BenchmarkDotNet.Exporters.Csv;
+using BenchmarkDotNet.Filters;
 using BenchmarkDotNet.Jobs;
 using BenchmarkDotNet.Loggers;
 using BenchmarkDotNet.Order;
 using BenchmarkDotNet.Validators;
+using BenchmarkDotNet.Reports;
 
 namespace BenchmarkDotNet.Configs
 {
@@ -41,11 +43,13 @@ namespace BenchmarkDotNet.Configs
             yield return EnvironmentAnalyser.Default;
             yield return OutliersAnalyser.Default;
             yield return MinIterationTimeAnalyser.Default;
+            yield return IterationSetupCleanupAnalyser.Default;
         }
 
         public IEnumerable<IValidator> GetValidators()
         {
             yield return BaselineValidator.FailOnError;
+            yield return SetupCleanupValidator.FailOnError;
             yield return JitOptimizationsValidator.DontFailOnError;
             yield return UnrollFactorValidator.Default;
         }
@@ -58,6 +62,12 @@ namespace BenchmarkDotNet.Configs
 
         public bool KeepBenchmarkFiles => false;
 
+        public ISummaryStyle GetSummaryStyle() => SummaryStyle.Default;
+
         public IEnumerable<IDiagnoser> GetDiagnosers() => Array.Empty<IDiagnoser>();
+
+        public IEnumerable<HardwareCounter> GetHardwareCounters() => Array.Empty<HardwareCounter>();
+
+        public IEnumerable<IFilter> GetFilters() => Array.Empty<IFilter>();
     }
 }

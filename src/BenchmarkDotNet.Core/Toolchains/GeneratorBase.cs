@@ -4,6 +4,7 @@ using System.Reflection;
 using BenchmarkDotNet.Characteristics;
 using BenchmarkDotNet.Code;
 using BenchmarkDotNet.Configs;
+using BenchmarkDotNet.Jobs;
 using BenchmarkDotNet.Loggers;
 using BenchmarkDotNet.Portability;
 using BenchmarkDotNet.Running;
@@ -18,9 +19,7 @@ namespace BenchmarkDotNet.Toolchains
             ArtifactsPaths artifactsPaths = null;
             try
             {
-                artifactsPaths = GetArtifactsPaths(benchmark, config, rootArtifactsFolderPath);
-
-                Cleanup(benchmark, artifactsPaths);
+                artifactsPaths = GetArtifactsPaths(benchmark, config, rootArtifactsFolderPath, resolver);
 
                 CopyAllRequiredFiles(benchmark, artifactsPaths);
 
@@ -29,21 +28,22 @@ namespace BenchmarkDotNet.Toolchains
                 GenerateProject(benchmark, artifactsPaths, resolver, logger);
                 GenerateBuildScript(benchmark, artifactsPaths, resolver);
 
-                return GenerateResult.Success(artifactsPaths);
+                return GenerateResult.Success(artifactsPaths, GetArtifactsToCleanup(benchmark, artifactsPaths));
             }
             catch (Exception ex)
             {
-                return GenerateResult.Failure(artifactsPaths, ex);
+                return GenerateResult.Failure(artifactsPaths, GetArtifactsToCleanup(benchmark, artifactsPaths), ex);
             }
         }
 
         protected abstract string GetBuildArtifactsDirectoryPath(Benchmark benchmark, string programName);
 
-        protected virtual string GetBinariesDirectoryPath(string buildArtifactsDirectoryPath) => buildArtifactsDirectoryPath;
+        protected virtual string GetBinariesDirectoryPath(string buildArtifactsDirectoryPath, string configuration) 
+            => buildArtifactsDirectoryPath;
 
         protected virtual string GetProjectFilePath(string binariesDirectoryPath) => string.Empty;
 
-        protected abstract void Cleanup(Benchmark benchmark, ArtifactsPaths artifactsPaths);
+        protected abstract string[] GetArtifactsToCleanup(Benchmark benchmark, ArtifactsPaths artifactsPaths);
 
         protected virtual void CopyAllRequiredFiles(Benchmark benchmark, ArtifactsPaths artifactsPaths) { }
 
@@ -51,18 +51,17 @@ namespace BenchmarkDotNet.Toolchains
 
         protected abstract void GenerateBuildScript(Benchmark benchmark, ArtifactsPaths artifactsPaths, IResolver resolver);
 
-        private ArtifactsPaths GetArtifactsPaths(Benchmark benchmark, IConfig config, string rootArtifactsFolderPath)
+        private ArtifactsPaths GetArtifactsPaths(Benchmark benchmark, IConfig config, string rootArtifactsFolderPath, IResolver resolver)
         {
-            // its not ".cs" in order to avoid VS from displaying and compiling it with xprojs
+            // its not ".cs" in order to avoid VS from displaying and compiling it with xprojs/csprojs that include all *.cs by default
             const string codeFileExtension = ".notcs";
 
             string programName = GetProgramName(benchmark, config);
             string buildArtifactsDirectoryPath = GetBuildArtifactsDirectoryPath(benchmark, programName);
-            string binariesDirectoryPath = GetBinariesDirectoryPath(buildArtifactsDirectoryPath);
+            string binariesDirectoryPath = GetBinariesDirectoryPath(buildArtifactsDirectoryPath, benchmark.Job.ResolveValue(InfrastructureMode.BuildConfigurationCharacteristic, resolver));
             string executablePath = Path.Combine(binariesDirectoryPath, $"{programName}{RuntimeInformation.ExecutableExtension}");
 
             return new ArtifactsPaths(
-                cleanup: artifactsPaths => Cleanup(benchmark, artifactsPaths),
                 rootArtifactsFolderPath: rootArtifactsFolderPath,
                 buildArtifactsDirectoryPath: buildArtifactsDirectoryPath,
                 binariesDirectoryPath: binariesDirectoryPath,
@@ -75,14 +74,11 @@ namespace BenchmarkDotNet.Toolchains
         }
 
         /// <summary>
-        /// when config is set to KeepBenchmarkFiles we use benchmark.ShortInfo as name,
-        /// otherwise (default) "BDN.Generated", mostly to prevent PathTooLongException
+        /// when config is set to KeepBenchmarkFiles we use benchmark.ShortInfo as name (some human might want to use it's content),
+        /// otherwise (default) new Guid to reduce the chance for UnauthorizedAccessException
         /// </summary>
         private static string GetProgramName(Benchmark benchmark, IConfig config)
-        {
-            const string shortName = "BDN.Generated";
-            return config.KeepBenchmarkFiles ? benchmark.FolderInfo : shortName;
-        }
+            => config.KeepBenchmarkFiles ? benchmark.FolderInfo : Guid.NewGuid().ToString();
 
         private static void GenerateCode(Benchmark benchmark, ArtifactsPaths artifactsPaths)
         {

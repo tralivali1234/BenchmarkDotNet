@@ -15,7 +15,7 @@ namespace BenchmarkDotNet.Toolchains.InProcess
         3. High data locality and no additional allocations / JIT where possible.
             This means NO closures allowed, no allocations but in .ctor and for LastCallResult boxing,
             all state should be stored explicitly as BenchmarkAction's fields.
-        4. There can be multiple benchmark actions per single target instance (target, setup, cleanup methods),
+        4. There can be multiple benchmark actions per single target instance (target, globalSetup, globalCleanup methods),
             so target instantiation is not a responsibility of the benchmark action.
         5. Implementation should match to the code in BenchmarkProgram.txt.
             As example, this code emits loop unroll only, task waiting is implemented as a delegate call.
@@ -31,6 +31,14 @@ namespace BenchmarkDotNet.Toolchains.InProcess
         /// <summary>Base class that provides reusable API for final implementations.</summary>
         internal abstract class BenchmarkActionBase : BenchmarkAction
         {
+            protected static TDelegate CreateMain<TDelegate>([CanBeNull] object targetInstance, MethodInfo mainMethod)
+            {
+                if (mainMethod.IsStatic)
+                    return (TDelegate)(object)mainMethod.CreateDelegate(typeof(TDelegate));
+
+                return (TDelegate)(object)mainMethod.CreateDelegate(typeof(TDelegate), targetInstance);
+            }
+
             protected static TDelegate CreateMainOrIdle<TDelegate>(
                 [CanBeNull] object targetInstance, [CanBeNull] MethodInfo mainMethod,
                 [NotNull] TDelegate idleStaticCallback, [NotNull] TDelegate idleInstanceCallback)
@@ -159,7 +167,7 @@ namespace BenchmarkDotNet.Toolchains.InProcess
                 bool hasStoreField = !noReturnValue && storeResultField != null;
 
                 var g = dynamicMethod.GetILGenerator();
-                g.DeclareLocal(typeof(int));
+                g.DeclareLocal(typeof(long));
 
                 var loopStart = g.DefineLabel();
                 var loopCondition = g.DefineLabel();

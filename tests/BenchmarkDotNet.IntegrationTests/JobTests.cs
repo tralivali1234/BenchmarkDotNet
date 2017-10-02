@@ -355,7 +355,7 @@ namespace BenchmarkDotNet.IntegrationTests
 
             a = InfrastructureMode.ToolchainCharacteristic;
             // will not throw:
-            a[j] = new CsProjNet46Toolchain();
+            a[j] = CsProjClassicNetToolchain.Net46;
             a[j] = null;
             a[j] = Characteristic.EmptyValue;
             Throws<ArgumentException>(() => a[j] = new EnvMode()); // not assignable;
@@ -371,14 +371,14 @@ namespace BenchmarkDotNet.IntegrationTests
             var a = CharacteristicHelper
                 .GetThisTypeCharacteristics(typeof(Job))
                 .Select(c => c.Id);
-            Equal(string.Join(";", a), "Id;Accuracy;Diagnoser;Env;Infrastructure;Run");
+            Equal(string.Join(";", a), "Id;Accuracy;Env;Infrastructure;Run");
             a = CharacteristicHelper
                 .GetAllCharacteristics(typeof(Job))
                 .Select(c => c.Id);
             Equal(string.Join(";", a), "Id;Accuracy;AnalyzeLaunchVariance;EvaluateOverhead;" +
-                "MaxStdErrRelative;MinInvokeCount;MinIterationTime;RemoveOutliers;Diagnoser;HardwareCounters;Env;Affinity;" +
+                "MaxAbsoluteError;MaxRelativeError;MinInvokeCount;MinIterationTime;RemoveOutliers;Env;Affinity;" +
                 "Jit;Platform;Runtime;Gc;AllowVeryLargeObjects;Concurrent;CpuGroups;Force;" +
-                "RetainVm;Server;Infrastructure;Clock;EngineFactory;Toolchain;Run;InvocationCount;IterationTime;" +
+                "RetainVm;Server;Infrastructure;Arguments;BuildConfiguration;Clock;EngineFactory;EnvironmentVariables;Toolchain;Run;InvocationCount;IterationTime;" +
                 "LaunchCount;RunStrategy;TargetCount;UnrollFactor;WarmupCount");
         }
     }

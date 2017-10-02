@@ -6,6 +6,8 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
+using BenchmarkDotNet.Diagnosers;
+using BenchmarkDotNet.Exporters;
 using Microsoft.Diagnostics.Tracing;
 using Microsoft.Diagnostics.Tracing.Parsers;
 using Microsoft.Diagnostics.Tracing.Session;
@@ -18,24 +20,28 @@ namespace BenchmarkDotNet.Diagnostics.Windows
         protected readonly Dictionary<Benchmark, int> BenchmarkToProcess = new Dictionary<Benchmark, int>();
         protected readonly ConcurrentDictionary<int, TStats> StatsPerProcess = new ConcurrentDictionary<int, TStats>();
 
+        public virtual RunMode GetRunMode(Benchmark benchmark) => RunMode.ExtraRun;
+
+        public virtual IEnumerable<IExporter> Exporters => Array.Empty<IExporter>();
+
         protected TraceEventSession Session { get; private set; }
 
         protected abstract ulong EventType { get; }
 
         protected abstract string SessionNamePrefix { get; }
 
-        protected void Start(Process process, Benchmark benchmark)
+        protected void Start(DiagnoserActionParameters parameters)
         {
-            Cleanup();
+            Clear();
 
-            BenchmarkToProcess.Add(benchmark, process.Id);
-            StatsPerProcess.TryAdd(process.Id, GetInitializedStats(benchmark));
+            BenchmarkToProcess.Add(parameters.Benchmark, parameters.Process.Id);
+            StatsPerProcess.TryAdd(parameters.Process.Id, GetInitializedStats(parameters));
 
-            Session = CreateSession(benchmark);
+            Session = CreateSession(parameters.Benchmark);
 
             EnableProvider();
 
-            AttachToEvents(Session, benchmark);
+            AttachToEvents(Session, parameters.Benchmark);
 
             // The ETW collection thread starts receiving events immediately, but we only
             // start aggregating them after ProcessStarted is called and we know which process
@@ -49,7 +55,7 @@ namespace BenchmarkDotNet.Diagnostics.Windows
             WaitUntilStarted(task);
         }
 
-        protected virtual TStats GetInitializedStats(Benchmark benchmark) => new TStats();
+        protected virtual TStats GetInitializedStats(DiagnoserActionParameters parameters) => new TStats();
 
         protected virtual TraceEventSession CreateSession(Benchmark benchmark)
              => new TraceEventSession(GetSessionName(SessionNamePrefix, benchmark, benchmark.Parameters));
@@ -71,7 +77,7 @@ namespace BenchmarkDotNet.Diagnostics.Windows
             Session.Dispose();
         }
 
-        private void Cleanup()
+        private void Clear()
         {
             BenchmarkToProcess.Clear();
             StatsPerProcess.Clear();

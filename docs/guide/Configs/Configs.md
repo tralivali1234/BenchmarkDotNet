@@ -5,26 +5,27 @@ Config is a set of so called `jobs`, `columns`, `exporters`, `loggers`, `diagnos
 ## Built-in configuration
 There are two built-in ways to set your config:
 
-###Object style
+### Object style
 
 ```cs
 [Config(typeof(Config))]
 public class MyClassWithBenchmarks
 {
-	private class Config : ManualConfig
+    private class Config : ManualConfig
     {
-    	public Config()
+        public Config()
         {
-        	Add(new Job1(), new Job2());
+            Add(new Job1(), new Job2());
             Add(new Column1(), new Column2());
             Add(new Exporter1(), new Exporter2());
             Add(new Logger1(), new Logger2());
             Add(new Diagnoser1(), new Diagnoser2());
             Add(new Analyser1(), new Analyser2());
+            Add(new Filter1(), new Filter2());
         }
     }
     
-	[Benchmark]
+    [Benchmark]
     public void Benchmark1()
     {
     }
@@ -36,7 +37,7 @@ public class MyClassWithBenchmarks
 }
 ```
 
-###Command style
+### Command style
 
 ```cs
 [Config("jobs=job1,job2 " +
@@ -47,7 +48,7 @@ public class MyClassWithBenchmarks
         "analysers=analyser1,analyser2")]
 public class MyClassWithBenchmarks
 {
-	[Benchmark]
+    [Benchmark]
     public void Benchmark1()
     {
     }
@@ -59,7 +60,7 @@ public class MyClassWithBenchmarks
 }
 ```
 
-##Custom configs
+## Custom configs
 
 You can also define your own way to specify config parameters. 
 
@@ -90,16 +91,16 @@ public class IntroConfigSource
 }
 ```
 
-###Fluent config
+### Fluent config
 
 There is no need to create new Config type, you can simply use fluent interface:
 
 ```cs
 BenchmarkRunner
-	.Run<Algo_Md5VsSha256>(
-		ManualConfig
-			.Create(DefaultConfig.Instance)
-			.With(Job.RyuJitX64)
-			.With(Job.Core)
-			.With(ExecutionValidator.FailOnError));
+    .Run<Algo_Md5VsSha256>(
+        ManualConfig
+            .Create(DefaultConfig.Instance)
+            .With(Job.RyuJitX64)
+            .With(Job.Core)
+            .With(ExecutionValidator.FailOnError));
 ```

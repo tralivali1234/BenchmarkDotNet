@@ -12,9 +12,9 @@ using BenchmarkDotNet.Extensions;
 using BenchmarkDotNet.Helpers;
 using BenchmarkDotNet.Jobs;
 using BenchmarkDotNet.Toolchains;
+using BenchmarkDotNet.Toolchains.CsProj;
 #if !CORE
 using System.Management;
-
 #endif
 
 namespace BenchmarkDotNet.Portability
@@ -46,7 +46,8 @@ namespace BenchmarkDotNet.Portability
         internal static bool IsLinux()
         {
 #if CLASSIC
-            return System.Environment.OSVersion.Platform == PlatformID.Unix;
+            return System.Environment.OSVersion.Platform == PlatformID.Unix
+                   && GetSysnameFromUname().Equals("Linux", StringComparison.InvariantCultureIgnoreCase);
 #else
             return System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(OSPlatform.Linux);
 #endif
@@ -55,7 +56,8 @@ namespace BenchmarkDotNet.Portability
         internal static bool IsMacOSX()
         {
 #if CLASSIC
-            return System.Environment.OSVersion.Platform == PlatformID.MacOSX;
+            return System.Environment.OSVersion.Platform == PlatformID.Unix
+                   && GetSysnameFromUname().Equals("Darwin", StringComparison.InvariantCultureIgnoreCase);
 #else
             return System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(OSPlatform.OSX);
 #endif
@@ -63,18 +65,12 @@ namespace BenchmarkDotNet.Portability
 
         internal static bool IsMono() => isMono;
 
-        internal static string GetOsVersion()
-        {
-#if CLASSIC
-            if (IsMono())
-                return System.Environment.OSVersion.ToString();
-#endif
-            return $"{Microsoft.DotNet.PlatformAbstractions.RuntimeEnvironment.OperatingSystem} {Microsoft.DotNet.PlatformAbstractions.RuntimeEnvironment.OperatingSystemVersion}";
-        }
+        internal static string GetOsVersion() => OsBrandStringHelper.Prettify(
+            Microsoft.DotNet.PlatformAbstractions.RuntimeEnvironment.OperatingSystem,
+            Microsoft.DotNet.PlatformAbstractions.RuntimeEnvironment.OperatingSystemVersion);
 
         internal static string GetProcessorName()
         {
-            string NiceString(string processorName) => Regex.Replace(processorName.Replace("@", "").Trim(), @"\s+", " ");
 #if !CORE
             if (IsWindows() && !IsMono())
             {
@@ -84,7 +80,7 @@ namespace BenchmarkDotNet.Portability
                     var mosProcessor = new ManagementObjectSearcher("SELECT * FROM Win32_Processor");
                     foreach (var moProcessor in mosProcessor.Get().Cast<ManagementObject>())
                         info += moProcessor["name"]?.ToString();
-                    return NiceString(info);
+                    return ProcessorBrandStringHelper.Prettify(info);
                 }
                 catch (Exception)
                 {
@@ -93,15 +89,25 @@ namespace BenchmarkDotNet.Portability
             }
 #endif
             if (IsWindows())
-                return NiceString(ExternalToolsHelper.Wmic.Value.GetValueOrDefault("Name") ?? "");
+                return ProcessorBrandStringHelper.Prettify(ExternalToolsHelper.Wmic.Value.GetValueOrDefault("Name") ?? "");
 
             if (IsLinux())
-                return NiceString(ExternalToolsHelper.ProcCpuInfo.Value.GetValueOrDefault("model name") ?? "");
+                return ProcessorBrandStringHelper.Prettify(ExternalToolsHelper.ProcCpuInfo.Value.GetValueOrDefault("model name") ?? "");
 
             if (IsMacOSX())
-                return NiceString(ExternalToolsHelper.Sysctl.Value.GetValueOrDefault("machdep.cpu.brand_string") ?? "");
+                return ProcessorBrandStringHelper.Prettify(ExternalToolsHelper.Sysctl.Value.GetValueOrDefault("machdep.cpu.brand_string") ?? "");
 
             return Unknown;
+        }
+
+        public static string GetNetCoreVersion()
+        {
+            var assembly = typeof(System.Runtime.GCSettings).GetTypeInfo().Assembly;
+            var assemblyPath = assembly.CodeBase.Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries);
+            int netCoreAppIndex = Array.IndexOf(assemblyPath, "Microsoft.NETCore.App");
+            if (netCoreAppIndex > 0 && netCoreAppIndex < assemblyPath.Length - 2)
+                return assemblyPath[netCoreAppIndex + 1];
+            return null;
         }
 
         internal static string GetRuntimeVersion()
@@ -129,9 +135,13 @@ namespace BenchmarkDotNet.Portability
                 }
             }
 
-            return $"Clr {System.Environment.Version}";
+            string frameworkVersion = CsProjClassicNetToolchain.GetCurrentNetFrameworkVersion();
+            string clrVersion = System.Environment.Version.ToString();
+            return $".NET Framework {frameworkVersion} (CLR {clrVersion})";
 #else
-            return System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription;
+            var runtimeVersion = GetNetCoreVersion() ?? "?";
+            string frameworkVersion = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription.Replace(".NET Core ", "");
+            return $".NET Core {runtimeVersion} (Framework {frameworkVersion})";
 #endif
         }
 
@@ -190,11 +200,6 @@ namespace BenchmarkDotNet.Portability
             if (IsMono())
                 return ""; // There is no helpful information about JIT on Mono
 #if CORE
-            // For now, we can say that CoreCLR supports only RyuJIT because we allow our users to run only x64 benchmark for Core.
-            // However if we enable 32bit support for .NET Core 1.1 it won't be true, because right now .NET Core is using Legacy Jit for 32bit.
-            // And 32bit .NET Core has support for Windows now only.
-            // NET Core 1.2 will move from leagacy Jitr for 32bits to RyuJIT which will be used by default.
-            // Most probably then also other OSes will get 32bit support.
             return "RyuJIT"; // CoreCLR supports only RyuJIT
 #else
             // We are working on Full CLR, so there are only LegacyJIT and RyuJIT
@@ -213,17 +218,7 @@ namespace BenchmarkDotNet.Portability
 #endif
         }
 
-        internal static IntPtr GetCurrentAffinity()
-        {
-            try
-            {
-                return Process.GetCurrentProcess().ProcessorAffinity;
-            }
-            catch (PlatformNotSupportedException)
-            {
-                return default(IntPtr);
-            }
-        }
+        internal static IntPtr GetCurrentAffinity() => Process.GetCurrentProcess().TryGetAffinity() ?? default(IntPtr);
 
         internal static string GetConfiguration()
         {
@@ -263,6 +258,102 @@ namespace BenchmarkDotNet.Portability
                 Name = name;
                 Version = version;
             }
+        }
+
+        [DllImport("libc", SetLastError = true)]
+        private static extern int uname(IntPtr buf);
+
+        private static string GetSysnameFromUname()
+        {
+            var buf = IntPtr.Zero;
+            try
+            {
+                buf = Marshal.AllocHGlobal(8192);
+                // This is a hacktastic way of getting sysname from uname ()
+                int rc = uname(buf);
+                if (rc != 0)
+                {
+                    throw new Exception("uname from libc returned " + rc);
+                }
+
+                string os = Marshal.PtrToStringAnsi(buf);
+                return os;
+            }
+            finally
+            {
+                if (buf != IntPtr.Zero)
+                    Marshal.FreeHGlobal(buf);
+            }
+        }
+
+        internal static ICollection<Antivirus> GetAntivirusProducts()
+        {
+#if !CORE
+            var products = new List<Antivirus>();
+            if (IsWindows())
+            {
+                try
+                {
+                    var wmi = new ManagementObjectSearcher(@"root\SecurityCenter2", "SELECT * FROM AntiVirusProduct");
+                    ManagementObjectCollection data = wmi.Get();
+
+                    foreach (ManagementBaseObject o in data)
+                    {
+                        var av = (ManagementObject)o;
+                        if (av != null)
+                        {
+                            string name = av["displayName"].ToString();
+                            string path = av["pathToSignedProductExe"].ToString();
+                            products.Add(new Antivirus(name, path));
+                        }
+                    }
+                }
+                catch { }
+            }
+
+            return products;
+#else
+            return Array.Empty<Antivirus>();
+#endif
+        }
+
+
+        internal static VirtualMachineHypervisor GetVirtualMachineHypervisor()
+        {
+            VirtualMachineHypervisor[] hypervisors = { HyperV.Default, VirtualBox.Default, VMware.Default };
+
+            if (IsWindows())
+            {
+#if !CORE
+                try
+                {
+                    using (ManagementObjectSearcher searcher = new ManagementObjectSearcher("Select * from Win32_ComputerSystem"))
+                    {
+                        using (ManagementObjectCollection items = searcher.Get())
+                        {
+                            foreach (ManagementBaseObject item in items)
+                            {
+                                string manufacturer = item["Manufacturer"]?.ToString();
+                                string model = item["Model"]?.ToString();
+                                return hypervisors.FirstOrDefault(x => x.IsVirtualMachine(manufacturer, model));
+                            }
+                        }
+                    }
+                }
+                catch { }
+#endif
+            }
+
+            return null;
+        }
+
+        public static bool IsClassic()
+        {
+#if CLASSIC
+            return true;
+#else
+            return false;
+#endif
         }
     }
 }

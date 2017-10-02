@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Reflection;
 using System.Threading.Tasks;
+using BenchmarkDotNet.Running;
 
 namespace BenchmarkDotNet.Toolchains.InProcess
 {
@@ -89,8 +90,17 @@ namespace BenchmarkDotNet.Toolchains.InProcess
 
             public BenchmarkActionTask(object instance, MethodInfo method, BenchmarkActionCodegen codegenMode, int unrollFactor)
             {
-                startTaskCallback = CreateMainOrIdle<Func<Task>>(instance, method, IdleStatic, IdleInstance);
-                callback = ExecuteBlocking;
+                bool isIdle = method == null;
+                if (!isIdle)
+                {
+                    startTaskCallback = CreateMain<Func<Task>>(instance, method);
+                    callback = ExecuteBlocking;
+                }
+                else
+                {
+                    callback = Idle;
+                }
+
                 InvokeSingle = callback;
 
                 if (UseFallbackCode(codegenMode, unrollFactor))
@@ -104,12 +114,10 @@ namespace BenchmarkDotNet.Toolchains.InProcess
                 }
             }
 
-            // can't use Task.CompletedTask here because it's new in .NET 4.6 (we target 4.5)
-            private static readonly Task Completed = Task.FromResult((object)null);
+            // must be kept in sync with VoidDeclarationsProvider.IdleImplementation
+            private void Idle() { }
 
-            private static Task IdleStatic() => Completed;
-            private Task IdleInstance() => Completed;
-
+            // must be kept in sync with TaskDeclarationsProvider.TargetMethodDelegate
             private void ExecuteBlocking() => startTaskCallback.Invoke().GetAwaiter().GetResult();
 
             private void InvokeMultipleHardcoded(long repeatCount)
@@ -128,8 +136,17 @@ namespace BenchmarkDotNet.Toolchains.InProcess
 
             public BenchmarkActionTask(object instance, MethodInfo method, BenchmarkActionCodegen codegenMode, int unrollFactor)
             {
-                startTaskCallback = CreateMainOrIdle<Func<Task<T>>>(instance, method, IdleStatic, IdleInstance);
-                callback = ExecuteBlocking;
+                bool isIdle = method == null;
+                if (!isIdle)
+                {
+                    startTaskCallback = CreateMain<Func<Task<T>>>(instance, method);
+                    callback = ExecuteBlocking;
+                }
+                else
+                {
+                    callback = Idle;
+                }
+
                 InvokeSingle = InvokeSingleHardcoded;
 
                 if (UseFallbackCode(codegenMode, unrollFactor))
@@ -143,10 +160,9 @@ namespace BenchmarkDotNet.Toolchains.InProcess
                 }
             }
 
-            private static readonly Task<T> Completed = Task.FromResult(default(T));
-            private static Task<T> IdleStatic() => Completed;
-            private Task<T> IdleInstance() => Completed;
+            private T Idle() => default(T);
 
+            // must be kept in sync with GenericTaskDeclarationsProvider.TargetMethodDelegate
             private T ExecuteBlocking() => startTaskCallback().GetAwaiter().GetResult();
 
             private void InvokeSingleHardcoded() => result = callback();
@@ -169,8 +185,17 @@ namespace BenchmarkDotNet.Toolchains.InProcess
 
             public BenchmarkActionValueTask(object instance, MethodInfo method, BenchmarkActionCodegen codegenMode, int unrollFactor)
             {
-                startTaskCallback = CreateMainOrIdle<Func<ValueTask<T>>>(instance, method, IdleStatic, IdleInstance);
-                callback = ExecuteBlocking;
+                bool isIdle = method == null;
+                if (!isIdle)
+                {
+                    startTaskCallback = CreateMain<Func<ValueTask<T>>>(instance, method);
+                    callback = ExecuteBlocking;
+                }
+                else
+                {
+                    callback = Idle;
+                }
+
                 InvokeSingle = InvokeSingleHardcoded;
 
                 if (UseFallbackCode(codegenMode, unrollFactor))
@@ -184,9 +209,9 @@ namespace BenchmarkDotNet.Toolchains.InProcess
                 }
             }
 
-            private static ValueTask<T> IdleStatic() => new ValueTask<T>(default(T));
-            private ValueTask<T> IdleInstance() => new ValueTask<T>(default(T));
+            private T Idle() => default(T);
 
+            // must be kept in sync with GenericTaskDeclarationsProvider.TargetMethodDelegate
             private T ExecuteBlocking() => startTaskCallback().GetAwaiter().GetResult();
 
             private void InvokeSingleHardcoded() => result = callback();

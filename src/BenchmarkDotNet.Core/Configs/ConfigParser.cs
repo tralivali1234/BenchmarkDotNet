@@ -11,6 +11,8 @@ using BenchmarkDotNet.Exporters.Csv;
 using BenchmarkDotNet.Exporters.Json;
 using BenchmarkDotNet.Validators;
 using BenchmarkDotNet.Extensions;
+using BenchmarkDotNet.Filters;
+using BenchmarkDotNet.Exporters.Xml;
 
 namespace BenchmarkDotNet.Configs
 {
@@ -67,6 +69,7 @@ namespace BenchmarkDotNet.Configs
                 { "legacyjitx86", new[] { Job.LegacyJitX86 } },
                 { "legacyjitx64", new[] { Job.LegacyJitX64 } },
                 { "ryujitx64", new[] { Job.RyuJitX64 } },
+                { "ryujitx86", new[] { Job.RyuJitX86 } },
                 { "dry", new[] { Job.Dry } },
                 { "clr", new[] { Job.Clr } },
                 { "mono", new[] { Job.Mono } },
@@ -107,6 +110,9 @@ namespace BenchmarkDotNet.Configs
                 { "briefjson", new[] { JsonExporter.Brief } },
                 { "fulljson", new[] { JsonExporter.Full } },
                 { "asciidoc", new[] { AsciiDocExporter.Default } },
+                { "xml", new[] { XmlExporter.Default } },
+                { "briefxml", new[] { XmlExporter.Brief } },
+                { "fullxml", new[] { XmlExporter.Full } },
             };
         private static Lazy<IExporter[]> allExporters = new Lazy<IExporter[]>(() => availableExporters.SelectMany(e => e.Value).ToArray());
 
@@ -151,6 +157,17 @@ namespace BenchmarkDotNet.Configs
                 var argument = argumentName.EndsWith("s") ? argumentName : argumentName + "s";
                 
                 argument = argument.StartsWith(optionPrefix) ? argument.Remove(0, 2) : argument;
+
+                switch (argument)
+                {
+                    case "categorys": // for now all the argument names at the place end with "s"
+                    case "allcategories":
+                        config.Add(new AllCategoriesFilter(values));
+                        break;
+                    case "anycategories":
+                        config.Add(new AnyCategoriesFilter(values));
+                        break;
+                }
 
                 if (configuration.ContainsKey(argument) == false)
                     continue;

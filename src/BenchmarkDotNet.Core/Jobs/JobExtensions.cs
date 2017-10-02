@@ -1,7 +1,7 @@
 ﻿using System;
+using System.Collections.Generic;
 using BenchmarkDotNet.Toolchains;
 using BenchmarkDotNet.Characteristics;
-using BenchmarkDotNet.Diagnosers;
 using BenchmarkDotNet.Engines;
 using BenchmarkDotNet.Environments;
 using BenchmarkDotNet.Horology;
@@ -38,17 +38,19 @@ namespace BenchmarkDotNet.Jobs
         public static Job With(this Job job, IToolchain toolchain) => job.WithCore(j => j.Infrastructure.Toolchain = toolchain);
         public static Job With(this Job job, IClock clock) => job.WithCore(j => j.Infrastructure.Clock = clock);
         public static Job With(this Job job, IEngineFactory engineFactory) => job.WithCore(j => j.Infrastructure.EngineFactory = engineFactory);
+        public static Job WithCustomBuildConfiguration(this Job job, string buildConfiguraiton) => job.WithCore(j => j.Infrastructure.BuildConfiguration = buildConfiguraiton);
+        public static Job With(this Job job, IReadOnlyList<EnvironmentVariable> environmentVariables) => job.WithCore(j => j.Infrastructure.EnvironmentVariables = environmentVariables);
+        public static Job With(this Job job, IReadOnlyList<Argument> arguments) => job.WithCore(j => j.Infrastructure.Arguments = arguments);
 
         // Accuracy
-        public static Job WithMaxStdErrRelative(this Job job, double value) => job.WithCore(j => j.Accuracy.MaxStdErrRelative = value);
+        public static Job WithMaxRelativeError(this Job job, double value) => job.WithCore(j => j.Accuracy.MaxRelativeError= value);
+        public static Job WithMaxAbsoluteError(this Job job, TimeInterval value) => job.WithCore(j => j.Accuracy.MaxAbsoluteError = value);
         public static Job WithMinIterationTime(this Job job, TimeInterval value) => job.WithCore(j => j.Accuracy.MinIterationTime = value);
         public static Job WithMinInvokeCount(this Job job, int value) => job.WithCore(j => j.Accuracy.MinInvokeCount = value);
         public static Job WithEvaluateOverhead(this Job job, bool value) => job.WithCore(j => j.Accuracy.EvaluateOverhead = value);
         public static Job WithRemoveOutliers(this Job job, bool value) => job.WithCore(j => j.Accuracy.RemoveOutliers = value);
         public static Job WithAnalyzeLaunchVariance(this Job job, bool value) => job.WithCore(j => j.Accuracy.AnalyzeLaunchVariance = value);
-
-        // Diagnoser
-        public static Job WithHardwareCounters(this Job job, params HardwareCounter[] counters) => job.WithCore(j => j.Diagnoser.HardwareCounters = counters);
+        
 
         // Info
         [Obsolete]

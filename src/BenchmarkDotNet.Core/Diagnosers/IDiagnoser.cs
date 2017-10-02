@@ -1,6 +1,6 @@
 ﻿using System.Collections.Generic;
-using System.Diagnostics;
 using BenchmarkDotNet.Columns;
+using BenchmarkDotNet.Exporters;
 using BenchmarkDotNet.Loggers;
 using BenchmarkDotNet.Running;
 using BenchmarkDotNet.Reports;
@@ -8,34 +8,61 @@ using BenchmarkDotNet.Validators;
 
 namespace BenchmarkDotNet.Diagnosers
 {
+    public enum RunMode : byte
+    {
+        /// <summary>
+        /// given diagnoser should not be executed for given benchmark
+        /// </summary>
+        None,
+        /// <summary>
+        /// needs extra run of the benchmark
+        /// </summary>
+        ExtraRun,
+        /// <summary>
+        /// implements some separate logic, that can be executed at any time
+        /// </summary>
+        SeparateLogic
+    }
+
     public interface IDiagnoser
     {
+        IEnumerable<string> Ids { get; } 
+
+        IEnumerable<IExporter> Exporters { get; }
+            
         IColumnProvider GetColumnProvider();
+
+        RunMode GetRunMode(Benchmark benchmark);
 
         /// <summary>
         /// before jitting, warmup
         /// </summary>
-        void BeforeAnythingElse(Process process, Benchmark benchmark);
+        void BeforeAnythingElse(DiagnoserActionParameters parameters);
 
         /// <summary>
-        /// after setup, before run
+        /// after globalSetup, before run
         /// </summary>
-        void AfterSetup(Process process, Benchmark benchmark);
+        void AfterGlobalSetup(DiagnoserActionParameters parameters);
 
         /// <summary>
-        /// after setup, warmup and pilot but before the main run
+        /// after globalSetup, warmup and pilot but before the main run
         /// </summary>
-        void BeforeMainRun(Process process, Benchmark benchmark);
+        void BeforeMainRun(DiagnoserActionParameters parameters);
 
         /// <summary>
-        /// after run, before cleanup
+        /// after run, before globalSleanup
         /// </summary>
-        void BeforeCleanup();
+        void BeforeGlobalCleanup(DiagnoserActionParameters parameters);
 
         void ProcessResults(Benchmark benchmark, BenchmarkReport report);
 
         void DisplayResults(ILogger logger);
 
         IEnumerable<ValidationError> Validate(ValidationParameters validationParameters);
+    }
+
+    public interface IConfigurableDiagnoser<TConfig> : IDiagnoser
+    {
+        IConfigurableDiagnoser<TConfig> Configure(TConfig config);
     }
 }

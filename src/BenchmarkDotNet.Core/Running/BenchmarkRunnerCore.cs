@@ -9,12 +9,16 @@ using BenchmarkDotNet.Engines;
 using BenchmarkDotNet.Environments;
 using BenchmarkDotNet.Exporters;
 using BenchmarkDotNet.Extensions;
+using BenchmarkDotNet.Filters;
 using BenchmarkDotNet.Horology;
 using BenchmarkDotNet.Jobs;
 using BenchmarkDotNet.Loggers;
 using BenchmarkDotNet.Mathematics;
+using BenchmarkDotNet.Portability;
 using BenchmarkDotNet.Reports;
 using BenchmarkDotNet.Toolchains;
+using BenchmarkDotNet.Toolchains.InProcess;
+using BenchmarkDotNet.Toolchains.Parameters;
 using BenchmarkDotNet.Toolchains.Results;
 using BenchmarkDotNet.Validators;
 
@@ -39,8 +43,17 @@ namespace BenchmarkDotNet.Running
             {
                 var logger = new CompositeLogger(config.GetCompositeLogger(), new StreamLogger(logStreamWriter));
                 benchmarks = GetSupportedBenchmarks(benchmarks, logger, toolchainProvider, resolver);
+                var artifactsToCleanup = new List<string>();
 
-                return Run(benchmarks, logger, title, config, rootArtifactsFolderPath, toolchainProvider, resolver);
+                try
+                {
+                    return Run(benchmarks, logger, title, config, rootArtifactsFolderPath, toolchainProvider, resolver, artifactsToCleanup);
+                }
+                finally
+                {
+                    logger.WriteLineHeader("// * Artifacts cleanup *");
+                    Cleanup(artifactsToCleanup);
+                }
             }
         }
 
@@ -53,7 +66,7 @@ namespace BenchmarkDotNet.Running
             return $"BenchmarkRun-{benchmarkRunIndex:##000}-{DateTime.Now:yyyy-MM-dd-hh-mm-ss}";
         }
 
-        public static Summary Run(Benchmark[] benchmarks, ILogger logger, string title, IConfig config, string rootArtifactsFolderPath, Func<Job, IToolchain> toolchainProvider, IResolver resolver)
+        public static Summary Run(Benchmark[] benchmarks, ILogger logger, string title, IConfig config, string rootArtifactsFolderPath, Func<Job, IToolchain> toolchainProvider, IResolver resolver, List<string> artifactsToCleanup)
         {
             logger.WriteLineHeader("// ***** BenchmarkRunner: Start   *****");
             logger.WriteLineInfo("// Found benchmarks:");
@@ -71,7 +84,7 @@ namespace BenchmarkDotNet.Running
             var reports = new List<BenchmarkReport>();
             foreach (var benchmark in benchmarks)
             {
-                var report = Run(benchmark, logger, config, rootArtifactsFolderPath, toolchainProvider, resolver);
+                var report = Run(benchmark, logger, config, rootArtifactsFolderPath, toolchainProvider, resolver, artifactsToCleanup);
                 reports.Add(report);
                 if (report.GetResultRuns().Any())
                     logger.WriteLineStatistic(report.GetResultRuns().GetStatistics().ToTimeStr());
@@ -117,6 +130,27 @@ namespace BenchmarkDotNet.Running
             // TODO: make exporter
             ConclusionHelper.Print(logger, config.GetCompositeAnalyser().Analyse(summary).ToList());
 
+            // TODO: move to conclusions
+            var columnWithLegends = summary.Table.Columns.Select(c => c.OriginalColumn).Where(c => !string.IsNullOrEmpty(c.Legend)).ToList();
+            var effectiveTimeUnit = summary.Table.EffectiveSummaryStyle.TimeUnit;
+            if (columnWithLegends.Any() || effectiveTimeUnit != null)
+            {
+                logger.WriteLine();
+                logger.WriteLineHeader("// * Legends *");
+                int maxNameWidth = 0;
+                if (columnWithLegends.Any())
+                    maxNameWidth = Math.Max(maxNameWidth, columnWithLegends.Select(c => c.ColumnName.Length).Max());
+                if (effectiveTimeUnit != null)
+                    maxNameWidth = Math.Max(maxNameWidth, effectiveTimeUnit.Name.Length + 2);
+
+                foreach (var column in columnWithLegends)
+                    logger.WriteLineHint($"  {column.ColumnName.PadRight(maxNameWidth, ' ')} : {column.Legend}");
+
+                if (effectiveTimeUnit != null)
+                    logger.WriteLineHint($"  {("1 " + effectiveTimeUnit.Name).PadRight(maxNameWidth, ' ')} :" +
+                                         $" 1 {effectiveTimeUnit.Description} ({TimeUnit.Convert(1, effectiveTimeUnit, TimeUnit.Second).ToStr("0.#########")} sec)");
+            }
+
             if (config.GetDiagnosers().Any())
             {
                 logger.WriteLine();
@@ -144,13 +178,14 @@ namespace BenchmarkDotNet.Running
             logger.WriteLineStatistic($"{message}: {time.ToFormattedTotalTime()}");
         }
 
-        public static BenchmarkReport Run(Benchmark benchmark, ILogger logger, IConfig config, string rootArtifactsFolderPath, Func<Job, IToolchain> toolchainProvider, IResolver resolver)
+        public static BenchmarkReport Run(Benchmark benchmark, ILogger logger, IConfig config, string rootArtifactsFolderPath, Func<Job, IToolchain> toolchainProvider, IResolver resolver, List<string> artifactsToCleanup)
         {
             var toolchain = toolchainProvider(benchmark.Job);
 
             logger.WriteLineHeader("// **************************");
             logger.WriteLineHeader("// Benchmark: " + benchmark.DisplayInfo);
 
+            var assemblyResolveHelper = GetAssemblyResolveHelper(toolchain, logger);
             var generateResult = Generate(logger, toolchain, benchmark, rootArtifactsFolderPath, config, resolver);
 
             try
@@ -177,14 +212,16 @@ namespace BenchmarkDotNet.Running
             catch (Exception e)
             {
                 logger.WriteLineError("// Exception: " + e);
-                return new BenchmarkReport(benchmark, generateResult, BuildResult.Failure(generateResult, e), new List<ExecuteResult>(), new List<Measurement>(), GcStats.Empty);
+                return new BenchmarkReport(benchmark, generateResult, BuildResult.Failure(generateResult, e), Array.Empty<ExecuteResult>(), Array.Empty<Measurement>(), GcStats.Empty);
             }
             finally
             {
                 if (!config.KeepBenchmarkFiles)
                 {
-                    generateResult.ArtifactsPaths?.RemoveBenchmarkFiles();
+                    artifactsToCleanup.AddRange(generateResult.ArtifactsToCleanup);
                 }
+
+                assemblyResolveHelper?.Dispose();
             }
         }
 
@@ -236,7 +273,7 @@ namespace BenchmarkDotNet.Running
             int defaultValue = analyzeRunToRunVariance ? 2 : 1;
             int launchCount = Math.Max(
                 1,
-                autoLaunchCount ? defaultValue: benchmark.Job.Run.LaunchCount);
+                autoLaunchCount ? defaultValue : benchmark.Job.Run.LaunchCount);
 
             for (int launchIndex = 0; launchIndex < launchCount; launchIndex++)
             {
@@ -247,7 +284,8 @@ namespace BenchmarkDotNet.Running
                     : " / " + launchCount;
                 logger.WriteLineInfo($"// Launch: {launchIndex + 1}{printedLaunchCount}");
 
-                var executeResult = toolchain.Executor.Execute(buildResult, benchmark, logger, resolver);
+                var executeResult = toolchain.Executor.Execute(
+                    new ExecuteParameters(buildResult, benchmark, logger, resolver, config));
 
                 if (!executeResult.FoundExecutable)
                     logger.WriteLineError($"Executable {buildResult.ArtifactsPaths.ExecutablePath} not found");
@@ -280,12 +318,13 @@ namespace BenchmarkDotNet.Running
             logger.WriteLine();
 
             // Do a "Diagnostic" run, but DISCARD the results, so that the overhead of Diagnostics doesn't skew the overall results
-            if (config.GetDiagnosers().Any())
+            if (config.GetDiagnosers().Any(diagnoser => diagnoser.GetRunMode(benchmark) == Diagnosers.RunMode.ExtraRun))
             {
                 logger.WriteLineInfo("// Run, Diagnostic");
-                var compositeDiagnoser = config.GetCompositeDiagnoser();
+                var compositeDiagnoser = config.GetCompositeDiagnoser(benchmark, Diagnosers.RunMode.ExtraRun);
 
-                var executeResult = toolchain.Executor.Execute(buildResult, benchmark, logger, resolver, compositeDiagnoser);
+                var executeResult = toolchain.Executor.Execute(
+                    new ExecuteParameters(buildResult, benchmark, logger, resolver, config, compositeDiagnoser));
 
                 var allRuns = executeResult.Data.Select(line => Measurement.Parse(logger, line, 0)).Where(r => r.IterationMode != IterationMode.Unknown).ToList();
                 gcStats = GcStats.Parse(executeResult.Data.Last());
@@ -296,9 +335,12 @@ namespace BenchmarkDotNet.Running
                     logger.WriteLineError("Executable not found");
                 logger.WriteLine();
             }
-            else if (!benchmark.Job.Diagnoser.HardwareCounters.IsNullOrEmpty())
+
+            foreach (var diagnoser in config.GetDiagnosers().Where(diagnoser => diagnoser.GetRunMode(benchmark) == Diagnosers.RunMode.SeparateLogic))
             {
-                logger.WriteLineError("Hardware Counters are not supported for your current platform yet");
+                logger.WriteLineInfo("// Run, Diagnostic [SeparateLogic]");
+
+                diagnoser.ProcessResults(benchmark, null);
             }
 
             return executeResults;
@@ -322,6 +364,33 @@ namespace BenchmarkDotNet.Running
             }
 
             return path;
+        }
+
+        private static IDisposable GetAssemblyResolveHelper(IToolchain toolchain, ILogger logger)
+        {
+#if CLASSIC
+            if (!(toolchain is InProcessToolchain) // we don't want to mess with assembly loading when running benchmarks in the same process (could produce wrong results)
+                && !RuntimeInformation.IsMono()) // so far it was never an issue for Mono
+            {
+                return Helpers.DirtyAssemblyResolveHelper.Create(logger);
+            }
+#endif
+            return null;
+        }
+
+        private static void Cleanup(List<string> artifactsToCleanup)
+        {
+            foreach (string path in artifactsToCleanup)
+            {
+                if (Directory.Exists(path))
+                {
+                    Directory.Delete(path, recursive: true);
+                }
+                else if (File.Exists(path))
+                {
+                    File.Delete(path);
+                }
+            }
         }
     }
 }

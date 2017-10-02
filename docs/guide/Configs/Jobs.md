@@ -1,13 +1,13 @@
 # Jobs
 
-Basically, *job* describes how to run your benchmark. Practically, it's a set of characteristics which can be specified. You can set one or several jobs for your benchmarks.
+Basically, a *job* describes how to run your benchmark. Practically, it's a set of characteristics which can be specified. You can specify one or several jobs for your benchmarks.
 
 ## Characteristics
 
 There are several categories of characteristics which you can specify. Let's consider each category in detail.
 
 ### Id
-It's a single string characteristics. It allows to name your job. This name will be used in logs and a part of a folder name with generated files for this job. `Id` doesn't affect benchmark results, but it can be useful for diagnostics. If you don't specify `Id`, random value will be chosed based on other characteristics
+It's a single string characteristic. It allows to name your job. This name will be used in logs and a part of a folder name with generated files for this job. `Id` doesn't affect benchmark results, but it can be useful for diagnostics. If you don't specify `Id`, random value will be chosen based on other characteristics
 
 ### Env
 `Env` specifies an environment of the job. You can specify the following characteristics:
@@ -37,6 +37,7 @@ In this category, you can specifiy how to benchmark each method.
 * `RunStrategy`:
   * `Throughput`: default strategy which allows to get good precision level
   * `ColdStart`: should be used only for measuring cold start of the application or testing purpose
+  * `Monitoring`: A mode without overhead evaluating, with several target iterations
 * `LaunchCount`: how many times we should launch process with target benchmark
 * `WarmupCount`: how many warmup iterations should be performed
 * `TargetCount`: how many target iterations should be performed
@@ -44,17 +45,17 @@ In this category, you can specifiy how to benchmark each method.
 * `UnrollFactor`: how many times the benchmark method will be invoked per one iteration of a generated loop
 * `InvocationCount`: count of invocation in a single iteration (if specified, `IterationTime` will be ignored), must be a multiple of `UnrollFactor`
 
-Usually, you shouldn't specify such characteristics like `LaunchCount`, `WarmupCount`, `TargetCount`, or `IterationTime` because BenchmarkDotNet has a smart algorithm to choose these values automatically based on recieved measurements. You can specify it for testing purposes or when you are damn sure that you know perfect characteristics for your benchmark (when you set `TargetCount` = `20` you should unserstand why `20` is a good value for your case).
+Usually, you shouldn't specify such characteristics like `LaunchCount`, `WarmupCount`, `TargetCount`, or `IterationTime` because BenchmarkDotNet has a smart algorithm to choose these values automatically based on received measurements. You can specify it for testing purposes or when you are damn sure that you know the right characteristics for your benchmark (when you set `TargetCount` = `20` you should understand why `20` is a good value for your case).
 
 ### Accuracy
-If you want to change the accuracy level, you should use the following characteristics instead of manual of values of `WarmupCount`, `TargetCount`, and so on.
+If you want to change the accuracy level, you should use the following characteristics instead of manually adjusting values of `WarmupCount`, `TargetCount`, and so on.
 
-* `MaxStdErrRelative`: Maximum relative standard error (`StandardError`/`Mean`) which you want to achive.
-* `MinIterationTime`: Minimum time of a single iteration. Unlike `Run.IterationTime`, this characteristic specify only the lower limit. In case of need, BenchmarkDotNet can increase this value.
+* `MaxRelativeError`, `MaxAbsoluteError`: Maximum acceptable error for a benchmark (by default, BenchmarkDotNet continue iterations until the actual error is less than the specified error). *In these two characteristics*, the error means half of 99.9% confidence interval. `MaxAbsoluteError` is an absolute `TimeInterval`; doesn't have a default value. `MaxRelativeError` defines max acceptable (`(<half of CI 99.9%>) / Mean`).
+* `MinIterationTime`: Minimum time of a single iteration. Unlike `Run.IterationTime`, this characteristic specifies only the lower limit. In case of need, BenchmarkDotNet can increase this value.
 * `MinInvokeCount`:  Minimum about of target method invocation. Default value if `4` but you can decrease this value for cases when single invocations takes a lot of time.
-* `EvaluateOverhead`: if you benchmark method takes nanoseconds, BenchmarkDotNet overhead can significantly affect measurements. If this characterics is enable, the overhead will be evaluated and substracted from the result measurements. Default value is `true`.
-* `RemoveOutliers`: sometimes you could have outliers in your measurements. Usually these are *unexpected* ourliers which arised because of other processes activities. If this characteristics is enable, all outliers will be removed from the result measurements. However, some of benchmarks have *expected* outliers. In these situation, you expect that some of invocation can produce ourliers measurements (e.g. in case of network acitivities, cache operations, and so on). If you want to see result statistics with these outliers, you should disable this characteristic. Default value is `true`.
-* `AnalyzeLaunchVariance`: this characteristics makes sense only if `Run.LaunchCount` is default. If this mode is enabled and , BenchmarkDotNet will try to perform several launches and detect if there is a veriance betnween launches. If this mode is disable, only one launch will be performed.
+* `EvaluateOverhead`: if you benchmark method takes nanoseconds, BenchmarkDotNet overhead can significantly affect measurements. If this characterics is enable, the overhead will be evaluated and subtracted from the result measurements. Default value is `true`.
+* `RemoveOutliers`: sometimes you could have outliers in your measurements. Usually these are unexpected outliers which arose because of other processes activities. If this characteristic is enable, all outliers will be removed from the result measurements. However, some of benchmarks have *expected* outliers. In these situation, you expect that some of invocation can produce outliers measurements (e.g. in case of network activities, cache operations, and so on). If you want to see result statistics with these outliers, you should disable this characteristic. Default value is `true`.
+* `AnalyzeLaunchVariance`: this characteristic makes sense only if `Run.LaunchCount` is default. If this mode is enabled and, BenchmarkDotNet will try to perform several launches and detect if there is a veriance between launches. If this mode is disable, only one launch will be performed.
 
 ### Infrastructure
 Usually, you shouldn't specify any characteristics from this section, it can be used for advanced cases only.
@@ -103,7 +104,7 @@ public class MyBenchmarks
 }
 ```
 
-Basically, it's a good idea to start with predefined values (e.g. `EnvMode.RyuJitX64` and `RunMode.Dry` passed as constructor args) and modify rest of the properties using property setters or with help of object initialzer syntax.
+Basically, it's a good idea to start with predefined values (e.g. `EnvMode.RyuJitX64` and `RunMode.Dry` passed as constructor args) and modify rest of the properties using property setters or with help of object initializer syntax.
 
 Note that the job cannot be modified after it's added into config. Trying to set a value on property of the frozen job will throw an `InvalidOperationException`. Use the `Job.Frozen` property to determine if the code properties can be altered.
 
@@ -128,16 +129,16 @@ You can also add new jobs via attributes. Examples:
 ```cs
 [DryJob]
 [ClrJob, CoreJob, MonoJob]
-[LegacyJitX86Job, LegacyJitX64, RyuJitX64Job]
+[LegacyJitX86Job, LegacyJitX64Job, RyuJitX64Job]
 [SimpleJob(RunStrategy.ColdStart, launchCount: 1, warmupCount: 5, targetCount: 5, id: "FastAndDirtyJob")]
 public class MyBenchmarkClass
 ```
 
-Note that each of the attribute identifies a separate job, the sample above will result in 8 different jobs, not merged one.
+Note that each of the attributes identifies a separate job, the sample above will result in 8 different jobs, not a single merged job.
 
 #### Custom attributes
 
-You can also create own custom attribute with your favorite set of jobs. Example:
+You can also create your own custom attributes with your favourite set of jobs. Example:
 
 ```cs
 [AttributeUsage(AttributeTargets.Class | AttributeTargets.Assembly)]

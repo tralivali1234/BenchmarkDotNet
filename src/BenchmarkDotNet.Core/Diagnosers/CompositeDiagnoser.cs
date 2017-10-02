@@ -1,7 +1,8 @@
-﻿using System.Collections.Generic;
-using System.Diagnostics;
+﻿using System;
+using System.Collections.Generic;
 using System.Linq;
 using BenchmarkDotNet.Columns;
+using BenchmarkDotNet.Exporters;
 using BenchmarkDotNet.Loggers;
 using BenchmarkDotNet.Running;
 using BenchmarkDotNet.Reports;
@@ -19,19 +20,27 @@ namespace BenchmarkDotNet.Diagnosers
             this.diagnosers = diagnosers.Distinct().ToArray();
         }
 
+        public RunMode GetRunMode(Benchmark benchmark) => throw new InvalidOperationException("Should never be called for Composite Diagnoser");
+
+        public IEnumerable<string> Ids => diagnosers.SelectMany(d => d.Ids);
+
+        public IEnumerable<IExporter> Exporters 
+            => diagnosers.SelectMany(diagnoser => diagnoser.Exporters);
+
         public IColumnProvider GetColumnProvider() 
             => new CompositeColumnProvider(diagnosers.Select(d => d.GetColumnProvider()).ToArray());
 
-        public void BeforeAnythingElse(Process process, Benchmark benchmark) 
-            => diagnosers.ForEach(diagnoser => diagnoser.BeforeAnythingElse(process, benchmark));
+        public void BeforeAnythingElse(DiagnoserActionParameters parameters) 
+            => diagnosers.ForEach(diagnoser => diagnoser.BeforeAnythingElse(parameters));
 
-        public void AfterSetup(Process process, Benchmark benchmark) 
-            => diagnosers.ForEach(diagnoser => diagnoser.AfterSetup(process, benchmark));
+        public void AfterGlobalSetup(DiagnoserActionParameters parameters) 
+            => diagnosers.ForEach(diagnoser => diagnoser.AfterGlobalSetup(parameters));
 
-        public void BeforeMainRun(Process process, Benchmark benchmark) 
-            => diagnosers.ForEach(diagnoser => diagnoser.BeforeMainRun(process, benchmark));
+        public void BeforeMainRun(DiagnoserActionParameters parameters) 
+            => diagnosers.ForEach(diagnoser => diagnoser.BeforeMainRun(parameters));
 
-        public void BeforeCleanup() => diagnosers.ForEach(diagnoser => diagnoser.BeforeCleanup());
+        public void BeforeGlobalCleanup(DiagnoserActionParameters parameters) 
+            => diagnosers.ForEach(diagnoser => diagnoser.BeforeGlobalCleanup(parameters));
 
         public void ProcessResults(Benchmark benchmark, BenchmarkReport report)
             => diagnosers.ForEach(diagnoser => diagnoser.ProcessResults(benchmark, report));

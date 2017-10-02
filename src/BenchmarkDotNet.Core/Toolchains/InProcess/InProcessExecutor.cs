@@ -13,6 +13,7 @@ using BenchmarkDotNet.Extensions;
 using BenchmarkDotNet.Jobs;
 using BenchmarkDotNet.Loggers;
 using BenchmarkDotNet.Running;
+using BenchmarkDotNet.Toolchains.Parameters;
 using BenchmarkDotNet.Toolchains.Results;
 using JetBrains.Annotations;
 
@@ -57,24 +58,17 @@ namespace BenchmarkDotNet.Toolchains.InProcess
         public bool LogOutput { get; }
 
         /// <summary>Executes the specified benchmark.</summary>
-        /// <param name="buildResult">The build result.</param>
-        /// <param name="benchmark">The benchmark.</param>
-        /// <param name="logger">The logger.</param>
-        /// <param name="resolver">The resolver.</param>
-        /// <param name="diagnoser">The diagnoser.</param>
-        /// <returns>Execution result.</returns>
-        public ExecuteResult Execute(
-            BuildResult buildResult, Benchmark benchmark, ILogger logger, IResolver resolver, IDiagnoser diagnoser = null)
+        public ExecuteResult Execute(ExecuteParameters executeParameters)
         {
             // TODO: preallocate buffer for output (no direct logging)?
-            var hostLogger = LogOutput ? logger : new CompositeLogger();
-            var host = new InProcessHost(benchmark, hostLogger, diagnoser);
+            var hostLogger = LogOutput ? executeParameters.Logger : NullLogger.Instance;
+            var host = new InProcessHost(executeParameters.Benchmark, hostLogger, executeParameters.Diagnoser, executeParameters.Config);
 
             int exitCode = -1;
-            var runThread = new Thread(() => exitCode = ExecuteCore(host, benchmark, logger));
+            var runThread = new Thread(() => exitCode = ExecuteCore(host, executeParameters.Benchmark, executeParameters.Logger));
 
-#if CLASSIC
-            if (benchmark.Target.Method.GetCustomAttributes<STAThreadAttribute>(false).Any())
+#if !NETCOREAPP1_1
+            if (executeParameters.Benchmark.Target.Method.GetCustomAttributes<STAThreadAttribute>(false).Any())
             {
                 runThread.SetApartmentState(ApartmentState.STA);
             }
@@ -87,10 +81,10 @@ namespace BenchmarkDotNet.Toolchains.InProcess
 
             if (!runThread.Join((int)timeout.TotalMilliseconds))
                 throw new InvalidOperationException(
-                    $"Benchmark {benchmark.DisplayInfo} takes to long to run. " +
+                    $"Benchmark {executeParameters.Benchmark.DisplayInfo} takes to long to run. " +
                     "Prefer to use out-of-process toolchains for long-running benchmarks.");
 
-            return GetExecutionResult(host.RunResults, exitCode, logger);
+            return GetExecutionResult(host.RunResults, exitCode, executeParameters.Logger);
         }
 
         private int ExecuteCore(IHost host, Benchmark benchmark, ILogger logger)
@@ -98,8 +92,8 @@ namespace BenchmarkDotNet.Toolchains.InProcess
             int exitCode = -1;
             var process = Process.GetCurrentProcess();
             var oldPriority = process.PriorityClass;
-            var oldAffinity = process.ProcessorAffinity;
-#if CLASSIC
+            var oldAffinity = process.TryGetAffinity();
+#if !NETCOREAPP1_1
             var thread = Thread.CurrentThread;
             var oldThreadPriority = thread.Priority;
 #endif
@@ -108,7 +102,7 @@ namespace BenchmarkDotNet.Toolchains.InProcess
             try
             {
                 process.TrySetPriority(ProcessPriorityClass.High, logger);
-#if CLASSIC
+#if !NETCOREAPP1_1
                 thread.TrySetPriority(ThreadPriority.Highest, logger);
 #endif
                 if (affinity != null)
@@ -125,12 +119,12 @@ namespace BenchmarkDotNet.Toolchains.InProcess
             finally
             {
                 process.TrySetPriority(oldPriority, logger);
-#if CLASSIC
+#if !NETCOREAPP1_1
                 thread.TrySetPriority(oldThreadPriority, logger);
 #endif
-                if (affinity != null)
+                if (affinity != null && oldAffinity != null)
                 {
-                    process.EnsureProcessorAffinity(oldAffinity);
+                    process.TrySetAffinity(oldAffinity.Value, logger);
                 }
             }
 

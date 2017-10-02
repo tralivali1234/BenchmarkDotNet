@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -21,6 +22,8 @@ namespace BenchmarkDotNet.Code
         {
             var provider = GetDeclarationsProvider(benchmark.Target);
 
+            (bool useShadowCopy, string shadowCopyFolderPath) = GetShadowCopySettings();
+
             string text = new SmartStringBuilder(ResourceHelper.LoadTemplate("BenchmarkProgram.txt")).
                 Replace("$OperationsPerInvoke$", provider.OperationsPerInvoke).
                 Replace("$TargetTypeNamespace$", provider.TargetTypeNamespace).
@@ -28,22 +31,46 @@ namespace BenchmarkDotNet.Code
                 Replace("$TargetTypeName$", provider.TargetTypeName).
                 Replace("$TargetMethodDelegate$", provider.TargetMethodDelegate).
                 Replace("$TargetMethodDelegateType$", provider.TargetMethodDelegateType).
+                Replace("$TargetMethodReturnType$", provider.TargetMethodReturnTypeName).
                 Replace("$IdleMethodDelegateType$", provider.IdleMethodDelegateType).
-                Replace("$IdleMethodReturnType$", provider.IdleMethodReturnType).
-                Replace("$SetupMethodName$", provider.SetupMethodName).
-                Replace("$CleanupMethodName$", provider.CleanupMethodName).
+                Replace("$IdleMethodReturnType$", provider.IdleMethodReturnTypeName).
+                Replace("$GlobalSetupMethodName$", provider.GlobalSetupMethodName).
+                Replace("$GlobalCleanupMethodName$", provider.GlobalCleanupMethodName).
+                Replace("$IterationSetupMethodName$", provider.IterationSetupMethodName).
+                Replace("$IterationCleanupMethodName$", provider.IterationCleanupMethodName).
                 Replace("$IdleImplementation$", provider.IdleImplementation).
-                Replace("$HasReturnValue$", provider.HasReturnValue).
+                Replace("$ExtraDefines$", provider.ExtraDefines).
+                Replace("$ConsumeField$", provider.ConsumeField).
                 Replace("$AdditionalLogic$", benchmark.Target.AdditionalLogic).
                 Replace("$JobSetDefinition$", GetJobsSetDefinition(benchmark)).
                 Replace("$ParamsContent$", GetParamsContent(benchmark)).
                 Replace("$ExtraAttribute$", GetExtraAttributes(benchmark.Target)).
                 Replace("$EngineFactoryType$", GetEngineFactoryTypeName(benchmark)). 
+                Replace("$ShadowCopyDefines$", useShadowCopy ? "#define SHADOWCOPY" : null).
+                Replace("$ShadowCopyFolderPath$", shadowCopyFolderPath).
                 ToString();
 
             text = Unroll(text, benchmark.Job.ResolveValue(RunMode.UnrollFactorCharacteristic, EnvResolver.Instance));
 
             return text;
+        }
+
+        private static (bool, string) GetShadowCopySettings()
+        {
+            var benchmarkDotNetLocation = Path.GetDirectoryName(typeof(CodeGenerator).GetTypeInfo().Assembly.Location);
+
+            if (benchmarkDotNetLocation != null && benchmarkDotNetLocation.ToUpper().Contains("LINQPAD"))
+            {
+                /* "LINQPad normally puts the compiled query into a different folder than the referenced assemblies 
+                 * - this allows for optimizations to reduce file I/O, which is important in the scratchpad scenario"
+                 * 
+                 * so in case we detect we are running from LINQPad, we give a hint to assembly loading to search also in this folder
+                 */
+
+                return (true, benchmarkDotNetLocation);
+            }
+
+            return (false, string.Empty);
         }
 
         private static string Unroll(string text, int factor)
@@ -89,14 +116,10 @@ namespace BenchmarkDotNet.Code
                 return new TaskDeclarationsProvider(target);
             }
             if (method.ReturnType.GetTypeInfo().IsGenericType 
-                && method.ReturnType.GetTypeInfo().GetGenericTypeDefinition() == typeof(Task<>))
+                && (method.ReturnType.GetTypeInfo().GetGenericTypeDefinition() == typeof(Task<>)
+                    || method.ReturnType.GetTypeInfo().GetGenericTypeDefinition() == typeof(ValueTask<>)))
             {
-                return new GenericTaskDeclarationsProvider(target, typeof(TaskMethodInvoker<>));
-            }
-            if (method.ReturnType.GetTypeInfo().IsGenericType 
-                && method.ReturnType.GetTypeInfo().GetGenericTypeDefinition() == typeof(ValueTask<>))
-            {
-                return new GenericTaskDeclarationsProvider(target, typeof(ValueTaskMethodInvoker<>));
+                return new GenericTaskDeclarationsProvider(target);
             }
 
             if (method.ReturnType == typeof(void))
@@ -123,7 +146,7 @@ namespace BenchmarkDotNet.Code
 
         private static string GetExtraAttributes(Target target)
         {
-#if !CORE
+#if !NETCOREAPP1_1
             if (target.Method.GetCustomAttributes(false).OfType<System.STAThreadAttribute>().Any())
             {
                 return "[System.STAThreadAttribute]";

@@ -4,9 +4,7 @@ namespace BenchmarkDotNet.Toolchains
 {
     public class ArtifactsPaths
     {
-        public static ArtifactsPaths Empty = new ArtifactsPaths(_ => { }, "", "", "", "", "", "", "", "", "");
-
-        public Action<ArtifactsPaths> Cleanup { get; }
+        public static ArtifactsPaths Empty = new ArtifactsPaths("", "", "", "", "", "", "", "", "");
 
         public string RootArtifactsFolderPath { get; }
 
@@ -27,7 +25,6 @@ namespace BenchmarkDotNet.Toolchains
         public string ProgramName { get; }
 
         public ArtifactsPaths(
-            Action<ArtifactsPaths> cleanup,
             string rootArtifactsFolderPath,
             string buildArtifactsDirectoryPath,
             string binariesDirectoryPath,
@@ -38,7 +35,6 @@ namespace BenchmarkDotNet.Toolchains
             string executablePath,
             string programName)
         {
-            Cleanup = cleanup;
             RootArtifactsFolderPath = rootArtifactsFolderPath;
             BuildArtifactsDirectoryPath = buildArtifactsDirectoryPath;
             BinariesDirectoryPath = binariesDirectoryPath;
@@ -48,11 +44,6 @@ namespace BenchmarkDotNet.Toolchains
             BuildScriptFilePath = buildScriptFilePath;
             ExecutablePath = executablePath;
             ProgramName = programName;
-        }
-
-        public void RemoveBenchmarkFiles()
-        {
-            Cleanup.Invoke(this);
         }
     }
 }

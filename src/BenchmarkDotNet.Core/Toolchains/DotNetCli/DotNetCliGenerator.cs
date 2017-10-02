@@ -1,9 +1,9 @@
 ﻿using System;
 using System.IO;
 using System.Linq;
-using System.Threading;
 using BenchmarkDotNet.Characteristics;
 using BenchmarkDotNet.Environments;
+using BenchmarkDotNet.Jobs;
 using BenchmarkDotNet.Running;
 using JetBrains.Annotations;
 
@@ -74,31 +74,8 @@ namespace BenchmarkDotNet.Toolchains.DotNetCli
             return false;
         }
 
-        protected override void Cleanup(Benchmark benchmark, ArtifactsPaths artifactsPaths)
-        {
-            if (!Directory.Exists(artifactsPaths.BuildArtifactsDirectoryPath))
-            {
-                return;
-            }
-
-            int attempt = 0;
-            while (true)
-            {
-                try
-                {
-                    Directory.Delete(artifactsPaths.BuildArtifactsDirectoryPath, recursive: true);
-                    return;
-                }
-                catch (DirectoryNotFoundException) // it's crazy but it happens ;)
-                {
-                    return;
-                }
-                catch (Exception) when (attempt++ < 5)
-                {
-                    Thread.Sleep(TimeSpan.FromMilliseconds(1000)); // Previous benchmark run didn't release some files
-                }
-            }
-        }
+        protected override string[] GetArtifactsToCleanup(Benchmark benchmark, ArtifactsPaths artifactsPaths)
+            => new[] { artifactsPaths.BuildArtifactsDirectoryPath };
 
         protected override void CopyAllRequiredFiles(Benchmark benchmark, ArtifactsPaths artifactsPaths)
         {
@@ -110,8 +87,8 @@ namespace BenchmarkDotNet.Toolchains.DotNetCli
 
         protected override void GenerateBuildScript(Benchmark benchmark, ArtifactsPaths artifactsPaths, IResolver resolver)
         {
-            string content = $"call dotnet {Builder.RestoreCommand}{Environment.NewLine}" +
-                             $"call dotnet {Builder.GetBuildCommand(TargetFrameworkMoniker, justTheProjectItself: false)}";
+            string content = $"call dotnet {Builder.RestoreCommand} {GetCustomArguments(benchmark, resolver)}{Environment.NewLine}" +
+                             $"call dotnet {Builder.GetBuildCommand(TargetFrameworkMoniker, false, benchmark.Job.ResolveValue(InfrastructureMode.BuildConfigurationCharacteristic, resolver))} {GetCustomArguments(benchmark, resolver)}";
 
             File.WriteAllText(artifactsPaths.BuildScriptFilePath, content);
         }
@@ -126,5 +103,15 @@ namespace BenchmarkDotNet.Toolchains.DotNetCli
             => directoryInfo
                 .GetFileSystemInfos()
                 .Any(fileInfo => fileInfo.Extension == ".sln" || fileInfo.Name == "global.json");
+
+        internal static string GetCustomArguments(Benchmark benchmark, IResolver resolver)
+        {
+            if (!benchmark.Job.HasValue(InfrastructureMode.ArgumentsCharacteristic))
+                return null;
+
+            var msBuildArguments = benchmark.Job.ResolveValue(InfrastructureMode.ArgumentsCharacteristic, resolver).OfType<MsBuildArgument>();
+
+            return string.Join(" ", msBuildArguments.Select(arg => arg.TextRepresentation));
+        }
     }
 }
